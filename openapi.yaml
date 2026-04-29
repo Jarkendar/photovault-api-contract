@@ -1,0 +1,1035 @@
+openapi: 3.1.0
+info:
+  title: PhotoVault API
+  description: |
+    Self-hosted photo library REST API. Backend runs on Raspberry Pi (Kotlin + Ktor),
+    Android client consumes it. See `../api.md` for narrative documentation and rationale.
+  version: 1.0.0-draft
+  contact:
+    name: PhotoVault
+    url: https://github.com/Jarkendar/PhotoVault
+  license:
+    name: TBD
+
+servers:
+  - url: http://{host}:{port}/v1
+    description: Self-hosted Ktor server
+    variables:
+      host:
+        default: 192.168.1.42
+        description: LAN IP of the Raspberry Pi or Tailscale hostname
+      port:
+        default: '8080'
+
+tags:
+  - name: auth
+    description: Authentication and session management
+  - name: photos
+    description: Photo metadata and binary access
+  - name: tags
+    description: User-defined text tags
+  - name: categories
+    description: User-defined categories with colors
+  - name: labels
+    description: System-defined color labels (read-only)
+  - name: uploads
+    description: Upload lifecycle
+  - name: users
+    description: User accounts (read-only via API)
+  - name: health
+    description: Service health
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Health
+  # ─────────────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [health]
+      summary: Health check
+      description: Public endpoint for connectivity verification.
+      security: []
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDto'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Auth
+  # ─────────────────────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Log in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated; tokens returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/InvalidToken'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Log out
+      responses:
+        '204':
+          description: Logged out; refresh token invalidated
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Get current user
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDto'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Photos
+  # ─────────────────────────────────────────────────────────────────────────
+  /photos:
+    get:
+      tags: [photos]
+      summary: List photos with filtering and pagination
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: Opaque pagination cursor from previous response
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
+        - name: q
+          in: query
+          schema: { type: string }
+          description: Free-text search across name, tag names, category names
+        - name: tagIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated tag IDs; AND logic
+          example: tag-001,tag-002
+        - name: categoryIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated category IDs; AND logic
+        - name: labelIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated label IDs; AND logic
+        - name: favoritesOnly
+          in: query
+          schema: { type: boolean, default: false }
+        - name: uploadedBy
+          in: query
+          schema: { type: string }
+          description: User ID, or `me` for current user
+      responses:
+        '200':
+          description: Paginated photo list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoPage'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /photos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PhotoId'
+    get:
+      tags: [photos]
+      summary: Get photo by ID
+      responses:
+        '200':
+          description: Photo found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoDto'
+        '404':
+          $ref: '#/components/responses/PhotoNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    patch:
+      tags: [photos]
+      summary: Update photo metadata (partial)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhotoPatchRequest'
+      responses:
+        '200':
+          description: Updated photo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/PhotoNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    delete:
+      tags: [photos]
+      summary: Delete photo
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/PhotoNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /photos/{id}/thumbnail:
+    parameters:
+      - $ref: '#/components/parameters/PhotoId'
+    get:
+      tags: [photos]
+      summary: Get photo thumbnail (small)
+      responses:
+        '200':
+          description: Thumbnail image
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/PhotoNotFound'
+        '423':
+          $ref: '#/components/responses/ProcessingNotReady'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /photos/{id}/medium:
+    parameters:
+      - $ref: '#/components/parameters/PhotoId'
+    get:
+      tags: [photos]
+      summary: Get photo medium-size version
+      responses:
+        '200':
+          description: Medium image
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/PhotoNotFound'
+        '423':
+          $ref: '#/components/responses/ProcessingNotReady'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /photos/{id}/original:
+    parameters:
+      - $ref: '#/components/parameters/PhotoId'
+    get:
+      tags: [photos]
+      summary: Get original photo file
+      responses:
+        '200':
+          description: Original image
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/PhotoNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Tags
+  # ─────────────────────────────────────────────────────────────────────────
+  /tags:
+    get:
+      tags: [tags]
+      summary: List all tags
+      parameters:
+        - name: usedOnly
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Tag list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      tags: [tags]
+      summary: Create a new tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagCreateRequest'
+      responses:
+        '201':
+          description: Tag created
+          headers:
+            Location:
+              schema: { type: string }
+              description: URL of the created tag
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '409':
+          $ref: '#/components/responses/DuplicateTagName'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /tags/{id}:
+    parameters:
+      - $ref: '#/components/parameters/TagId'
+    patch:
+      tags: [tags]
+      summary: Rename a tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagUpdateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/TagNotFound'
+        '409':
+          $ref: '#/components/responses/DuplicateTagName'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    delete:
+      tags: [tags]
+      summary: Delete a tag
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/TagNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Categories
+  # ─────────────────────────────────────────────────────────────────────────
+  /categories:
+    get:
+      tags: [categories]
+      summary: List all categories
+      responses:
+        '200':
+          description: Category list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      tags: [categories]
+      summary: Create a new category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryCreateRequest'
+      responses:
+        '201':
+          description: Category created
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '409':
+          $ref: '#/components/responses/DuplicateCategoryName'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /categories/{id}:
+    parameters:
+      - $ref: '#/components/parameters/CategoryId'
+    patch:
+      tags: [categories]
+      summary: Update category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryUpdateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/CategoryNotFound'
+        '409':
+          $ref: '#/components/responses/DuplicateCategoryName'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    delete:
+      tags: [categories]
+      summary: Delete category
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/CategoryNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Labels (read-only)
+  # ─────────────────────────────────────────────────────────────────────────
+  /labels:
+    get:
+      tags: [labels]
+      summary: List all labels (system-defined)
+      responses:
+        '200':
+          description: Label list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Uploads
+  # ─────────────────────────────────────────────────────────────────────────
+  /uploads:
+    get:
+      tags: [uploads]
+      summary: List active and recent uploads
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+          description: Comma-separated statuses to filter
+          example: processing,uploading
+      responses:
+        '200':
+          description: Upload list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      tags: [uploads]
+      summary: Start a new upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Image file (JPEG, PNG, or HEIC)
+                metadata:
+                  type: string
+                  description: |
+                    Optional JSON object: `{"tagIds": [...], "categoryIds": [...], "labelIds": [...]}`
+              required: [file]
+      responses:
+        '202':
+          description: Upload accepted; processing started
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '413':
+          $ref: '#/components/responses/UploadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedFileType'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /uploads/{id}:
+    parameters:
+      - $ref: '#/components/parameters/UploadId'
+    get:
+      tags: [uploads]
+      summary: Get upload status
+      responses:
+        '200':
+          description: Upload state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadDto'
+        '404':
+          $ref: '#/components/responses/UploadNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    delete:
+      tags: [uploads]
+      summary: Cancel an upload
+      responses:
+        '204':
+          description: Cancelled
+        '404':
+          $ref: '#/components/responses/UploadNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidStateTransition'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Users
+  # ─────────────────────────────────────────────────────────────────────────
+  /users:
+    get:
+      tags: [users]
+      summary: List all users
+      responses:
+        '200':
+          description: User list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PhotoId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+      example: photo-abc123
+    TagId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+      example: tag-001
+    CategoryId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+      example: cat-001
+    UploadId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+      example: upload-xyz789
+
+  schemas:
+
+    # Auth
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, example: jarek }
+        password: { type: string, format: password }
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+
+    AuthResponse:
+      type: object
+      required: [accessToken, refreshToken, user]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        user:
+          $ref: '#/components/schemas/UserDto'
+
+    # User
+    UserDto:
+      type: object
+      required: [id, username, displayName]
+      properties:
+        id: { type: string, example: user-jarek }
+        username: { type: string, example: jarek }
+        displayName: { type: string, example: Jarek }
+
+    UserRefDto:
+      description: Lightweight user reference embedded in other resources
+      type: object
+      required: [id, displayName]
+      properties:
+        id: { type: string, example: user-jarek }
+        displayName: { type: string, example: Jarek }
+
+    UserList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserDto'
+
+    # Photo
+    PhotoDto:
+      type: object
+      required:
+        - id
+        - name
+        - sizeBytes
+        - mimeType
+        - width
+        - height
+        - uploadedAt
+        - uploadedBy
+        - tags
+        - categories
+        - labels
+        - isFavorite
+        - processingStatus
+        - thumbnailUrl
+        - mediumUrl
+        - originalUrl
+      properties:
+        id: { type: string, example: photo-abc123 }
+        name: { type: string, example: zachod_morze.jpg }
+        sizeBytes: { type: integer, format: int64, example: 4195000 }
+        mimeType: { type: string, example: image/jpeg }
+        width: { type: integer, example: 4032 }
+        height: { type: integer, example: 3024 }
+        capturedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-04-18T17:24:00Z'
+        uploadedAt:
+          type: string
+          format: date-time
+          example: '2026-04-18T17:24:30Z'
+        camera:
+          type: string
+          nullable: true
+          example: Pixel 8 Pro
+        location:
+          $ref: '#/components/schemas/LocationDto'
+        uploadedBy:
+          $ref: '#/components/schemas/UserRefDto'
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/TagDto'
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryDto'
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/LabelDto'
+        isFavorite: { type: boolean }
+        processingStatus:
+          type: string
+          enum: [processing, ready]
+        thumbnailUrl: { type: string, example: /v1/photos/photo-abc123/thumbnail }
+        mediumUrl: { type: string, example: /v1/photos/photo-abc123/medium }
+        originalUrl: { type: string, example: /v1/photos/photo-abc123/original }
+
+    PhotoPatchRequest:
+      type: object
+      properties:
+        isFavorite: { type: boolean }
+        tagIds:
+          type: array
+          items: { type: string }
+        categoryIds:
+          type: array
+          items: { type: string }
+        labelIds:
+          type: array
+          items: { type: string }
+
+    PhotoPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PhotoDto'
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore: { type: boolean }
+
+    LocationDto:
+      type: object
+      nullable: true
+      required: [latitude, longitude]
+      properties:
+        latitude: { type: number, format: double, example: 54.4641 }
+        longitude: { type: number, format: double, example: 18.5734 }
+        placeName:
+          type: string
+          nullable: true
+          example: Sopot, PL
+
+    # Tag
+    TagDto:
+      type: object
+      required: [id, name, photoCount]
+      properties:
+        id: { type: string, example: tag-001 }
+        name: { type: string, example: '#morze' }
+        photoCount: { type: integer, example: 48 }
+
+    TagList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TagDto'
+
+    TagCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          example: '#sunset'
+          description: Must start with `#`, must be unique (case-insensitive)
+
+    TagUpdateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          example: '#newname'
+
+    # Category
+    CategoryDto:
+      type: object
+      required: [id, name, colorHex, photoCount]
+      properties:
+        id: { type: string, example: cat-001 }
+        name: { type: string, example: Natura }
+        colorHex: { type: string, pattern: '^#[0-9A-Fa-f]{6}$', example: '#FF8B45' }
+        photoCount: { type: integer, example: 48 }
+
+    CategoryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryDto'
+
+    CategoryCreateRequest:
+      type: object
+      required: [name, colorHex]
+      properties:
+        name: { type: string, example: Natura }
+        colorHex: { type: string, pattern: '^#[0-9A-Fa-f]{6}$', example: '#FF8B45' }
+
+    CategoryUpdateRequest:
+      type: object
+      properties:
+        name: { type: string }
+        colorHex: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+
+    # Label
+    LabelDto:
+      type: object
+      required: [id, name, colorHex, photoCount]
+      properties:
+        id: { type: string, example: label-orange }
+        name:
+          type: string
+          enum: [red, orange, yellow, green, blue, purple]
+        colorHex: { type: string, example: '#FF8B45' }
+        photoCount: { type: integer, example: 23 }
+
+    LabelList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LabelDto'
+
+    # Upload
+    UploadDto:
+      type: object
+      required: [id, fileName, sizeBytes, uploadedBytes, status, progress, createdAt]
+      properties:
+        id: { type: string, example: upload-xyz789 }
+        fileName: { type: string, example: IMG_20260418_172400.jpg }
+        sizeBytes: { type: integer, format: int64, example: 4195000 }
+        uploadedBytes: { type: integer, format: int64, example: 4195000 }
+        status:
+          type: string
+          enum: [created, uploading, processing, done, failed, cancelled]
+        progress:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          example: 1.0
+        photoId:
+          type: string
+          nullable: true
+          description: Set when status is `done`
+        error:
+          type: string
+          nullable: true
+          description: Set when status is `failed`
+        createdAt:
+          type: string
+          format: date-time
+
+    UploadList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UploadDto'
+
+    # Health
+    HealthDto:
+      type: object
+      required: [status, version]
+      properties:
+        status: { type: string, enum: [ok] }
+        version: { type: string, example: 1.0.0 }
+
+    # Error (RFC 7807)
+    ProblemDetails:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI identifying the error type
+        title:
+          type: string
+          description: Short, human-readable summary
+        status:
+          type: integer
+          description: HTTP status code (mirrors response status)
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence
+        instance:
+          type: string
+          format: uri
+          description: URI of the request that caused the error
+        errors:
+          type: object
+          description: |
+            Validation errors keyed by field name. Only present for `validation-failed` (HTTP 400).
+          additionalProperties:
+            type: array
+            items:
+              type: string
+
+  responses:
+
+    Unauthenticated:
+      description: Missing or invalid Authorization header
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    InvalidToken:
+      description: Token is expired, malformed, or revoked
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    InvalidCredentials:
+      description: Login failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    ValidationFailed:
+      description: Request validation failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    PhotoNotFound:
+      description: Photo not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    TagNotFound:
+      description: Tag not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    CategoryNotFound:
+      description: Category not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    UploadNotFound:
+      description: Upload not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    DuplicateTagName:
+      description: A tag with this name already exists
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    DuplicateCategoryName:
+      description: A category with this name already exists
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    UploadTooLarge:
+      description: File exceeds server's max upload size
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    UnsupportedFileType:
+      description: File MIME type is not allowed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    ProcessingNotReady:
+      description: Photo's derived assets are still being generated
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    InvalidStateTransition:
+      description: Operation not allowed in current resource state
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
