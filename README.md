@@ -1,5 +1,7 @@
 # photovault-api-contract
 
+https://jarkendar.github.io/photovault-api-contract/#/
+
 Single source of truth for the **PhotoVault REST API** (`/v1`). This repository is consumed
 as a **git submodule** by both sides of the system so they pin the exact same contract
 version:
