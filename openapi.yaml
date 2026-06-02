@@ -171,6 +171,25 @@ paths:
           in: query
           schema: { type: string }
           description: User ID, or `me` for current user
+        - name: matchMode
+          in: query
+          schema: { type: string, enum: [all, any], default: all }
+          description: |
+            Combination logic for multi-value filters (tagIds, categoryIds, labelIds).
+            `all` = AND (photo must match every listed value).
+            `any` = OR (photo must match at least one listed value).
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date-time }
+          description: |
+            Include only photos with capturedAt >= dateFrom (falls back to uploadedAt
+            when capturedAt is null). ISO-8601 date-time string.
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date-time }
+          description: |
+            Include only photos with capturedAt <= dateTo (falls back to uploadedAt
+            when capturedAt is null). ISO-8601 date-time string.
       responses:
         '200':
           description: Paginated photo list
@@ -178,6 +197,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PhotoPage'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /photos/count:
+    get:
+      tags: [photos]
+      summary: Count photos matching the given filters
+      description: |
+        Returns the total number of photos matching the same filter set as
+        `GET /photos`, without pagination overhead. Intended for live result
+        count display in filter UIs before the user applies the filter.
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+          description: Free-text search across name, tag names, category names
+        - name: tagIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated tag IDs
+          example: tag-001,tag-002
+        - name: categoryIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated category IDs
+        - name: labelIds
+          in: query
+          schema: { type: string }
+          description: Comma-separated label IDs
+        - name: favoritesOnly
+          in: query
+          schema: { type: boolean, default: false }
+        - name: uploadedBy
+          in: query
+          schema: { type: string }
+          description: User ID, or `me` for current user
+        - name: matchMode
+          in: query
+          schema: { type: string, enum: [all, any], default: all }
+          description: Combination logic for multi-value filters (all=AND, any=OR)
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date-time }
+          description: Lower bound on capturedAt (falls back to uploadedAt)
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date-time }
+          description: Upper bound on capturedAt (falls back to uploadedAt)
+      responses:
+        '200':
+          description: Matching photo count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoCount'
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '401':
@@ -755,6 +831,12 @@ components:
           type: string
           nullable: true
         hasMore: { type: boolean }
+
+    PhotoCount:
+      type: object
+      required: [count]
+      properties:
+        count: { type: integer, example: 42 }
 
     LocationDto:
       type: object

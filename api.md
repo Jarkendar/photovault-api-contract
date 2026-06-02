@@ -192,6 +192,9 @@ List photos, paginated.
 | `labelIds` | string (csv) | — | Filter by labels (AND). |
 | `favoritesOnly` | bool | false | If true, return only favorited photos. |
 | `uploadedBy` | string | — | Filter by uploader user ID. Special value: `me` resolves to the authenticated user. |
+| `matchMode` | string | `all` | Combination logic for multi-value filters (`tagIds`, `categoryIds`, `labelIds`). `all` = AND (photo must have **every** listed value); `any` = OR (photo must have **at least one** listed value). |
+| `dateFrom` | string (date-time) | — | Lower bound: include photos where `capturedAt >= dateFrom` (falls back to `uploadedAt` when `capturedAt` is null). ISO-8601. |
+| `dateTo` | string (date-time) | — | Upper bound: include photos where `capturedAt <= dateTo` (falls back to `uploadedAt` when `capturedAt` is null). ISO-8601. |
 
 **Success — 200 OK:**
 
@@ -242,6 +245,18 @@ List photos, paginated.
 If there are no more pages: `nextCursor: null`, `hasMore: false`.
 
 Photos are sorted by `uploadedAt` descending (newest first), then by `id` for stable ordering when timestamps collide.
+
+#### `GET /v1/photos/count`
+
+Returns the number of photos matching the same filter set as `GET /v1/photos`, without any pagination overhead. Designed for live result-count display in filter UIs: call this endpoint as the user adjusts filters, then call `GET /v1/photos` only after they confirm.
+
+**Query parameters:** same as `GET /v1/photos` **excluding** `cursor` and `limit`.
+
+**Success — 200 OK:**
+
+```json
+{ "count": 42 }
+```
 
 #### `GET /v1/photos/{id}`
 
@@ -572,9 +587,9 @@ WHERE (uploadedAt, id) < (?, ?) ORDER BY uploadedAt DESC, id DESC LIMIT ?
 
 This makes pagination **stable under concurrent inserts** — adding a photo while paging won't shift positions or duplicate results.
 
-### Why no `totalCount`?
+### Why no `totalCount` in the list response?
 
-Counting all matching rows on every paginated request is expensive (a separate `COUNT(*)` query). Infinite scroll doesn't need a total — the user scrolls until `hasMore` is false. If a counter is needed for UI (e.g., "1247 photos"), we'll add a dedicated endpoint like `GET /v1/photos/count?...` that the client calls once.
+Counting all matching rows on every paginated request is expensive (a separate `COUNT(*)` query). Infinite scroll doesn't need a total — the user scrolls until `hasMore` is false. For filter UIs that need a live "N photos" counter, use the dedicated `GET /v1/photos/count` endpoint instead — it accepts the same filter parameters and returns `{ count: integer }` in a single cheap call.
 
 ---
 
