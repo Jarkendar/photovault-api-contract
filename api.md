@@ -176,6 +176,18 @@ User accounts are created administratively (direct database insert or a server C
 
 The central resource. A photo is a binary file (JPEG/PNG/HEIC) plus metadata, uploaded by a specific user, optionally annotated with tags, categories, and labels.
 
+#### Photo processing status
+
+Every photo has a `processingStatus` field that reflects where it is in the server-side pipeline:
+
+| Value | Description |
+|---|---|
+| `processing` | Assets are still being generated (thumbnail, medium). Thumbnail and medium endpoints return 423. |
+| `pending_categorization` | Assets are ready and fully accessible. The photo is waiting for the categoriser to run. |
+| `ready` | Categorisation complete. Terminal state. |
+
+Photos leave the upload pipeline in `pending_categorization`. The categoriser (a separate process) advances them to `ready`. Until the categoriser is implemented, photos remain in `pending_categorization` indefinitely — this is expected behaviour.
+
 #### `GET /v1/photos`
 
 List photos, paginated.
@@ -195,6 +207,7 @@ List photos, paginated.
 | `matchMode` | string | `all` | Combination logic for multi-value filters (`tagIds`, `categoryIds`, `labelIds`). `all` = AND (photo must have **every** listed value); `any` = OR (photo must have **at least one** listed value). |
 | `dateFrom` | string (date-time) | — | Lower bound: include photos where `capturedAt >= dateFrom` (falls back to `uploadedAt` when `capturedAt` is null). ISO-8601. |
 | `dateTo` | string (date-time) | — | Upper bound: include photos where `capturedAt <= dateTo` (falls back to `uploadedAt` when `capturedAt` is null). ISO-8601. |
+| `processingStatus` | string | — | Filter by photo processing status. Allowed values: `processing`, `pending_categorization`, `ready`. Use `pending_categorization` to list photos awaiting the categoriser. |
 
 **Success — 200 OK:**
 
@@ -231,7 +244,7 @@ List photos, paginated.
         {"id": "label-orange", "name": "orange", "colorHex": "#FF8B45", "photoCount": 23}
       ],
       "isFavorite": true,
-      "processingStatus": "ready",
+      "processingStatus": "pending_categorization",
       "thumbnailUrl": "/v1/photos/photo-abc123/thumbnail",
       "mediumUrl": "/v1/photos/photo-abc123/medium",
       "originalUrl": "/v1/photos/photo-abc123/original"
@@ -308,6 +321,7 @@ Fetch the small thumbnail (typically 200×200, server-decided).
 
 - 404 if the photo doesn't exist
 - 423 Locked (`type: processing-not-ready`) if the photo's `processingStatus` is still `processing`
+  (only `processing` blocks asset delivery; `pending_categorization` and `ready` are fully accessible)
 
 #### `GET /v1/photos/{id}/medium`
 

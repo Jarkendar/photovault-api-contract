@@ -190,6 +190,12 @@ paths:
           description: |
             Include only photos with capturedAt <= dateTo (falls back to uploadedAt
             when capturedAt is null). ISO-8601 date-time string.
+        - name: processingStatus
+          in: query
+          schema: { type: string, enum: [processing, pending_categorization, ready] }
+          description: |
+            Filter by photo processing status. Use `pending_categorization` to list
+            photos that have not yet been processed by the categoriser.
       responses:
         '200':
           description: Paginated photo list
@@ -247,6 +253,10 @@ paths:
           in: query
           schema: { type: string, format: date-time }
           description: Upper bound on capturedAt (falls back to uploadedAt)
+        - name: processingStatus
+          in: query
+          schema: { type: string, enum: [processing, pending_categorization, ready] }
+          description: Filter by photo processing status
       responses:
         '200':
           description: Matching photo count
@@ -800,7 +810,7 @@ components:
         isFavorite: { type: boolean }
         processingStatus:
           type: string
-          enum: [processing, ready]
+          enum: [processing, pending_categorization, ready]
         thumbnailUrl: { type: string, example: /v1/photos/photo-abc123/thumbnail }
         mediumUrl: { type: string, example: /v1/photos/photo-abc123/medium }
         originalUrl: { type: string, example: /v1/photos/photo-abc123/original }
