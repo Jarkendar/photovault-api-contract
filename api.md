@@ -351,13 +351,23 @@ List all tags.
 |------|------|---------|-------------|
 | `usedOnly` | bool | false | If true, return only tags that are assigned to at least one photo. |
 
+**`TagDto` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Opaque id with `tag-` prefix. |
+| `name` | string | `#`-prefixed label text. |
+| `photoCount` | integer | Number of photos carrying this tag (denied assignments excluded). |
+| `autoEnabled` | boolean | Human switch — allows the ML bot to assign this tag automatically. Default `false`. |
+| `rolledOut` | boolean | `false` while a new tag is awaiting a full library backfill pass. Flipped to `true` after the scoring run. Default `true`. |
+
 **Success — 200 OK:**
 
 ```json
 {
   "items": [
-    {"id": "tag-001", "name": "#morze", "photoCount": 48},
-    {"id": "tag-002", "name": "#zachód-słońca", "photoCount": 12}
+    {"id": "tag-001", "name": "#morze", "photoCount": 48, "autoEnabled": false, "rolledOut": true},
+    {"id": "tag-002", "name": "#zachód-słońca", "photoCount": 12, "autoEnabled": true, "rolledOut": true}
   ]
 }
 ```
@@ -376,7 +386,7 @@ Create a new tag.
 
 `name` must start with `#`, must not be blank, and must be unique (case-insensitive).
 
-**Success — 201 Created** with the new `TagDto` and `Location` header pointing to `/v1/tags/{id}`.
+**Success — 201 Created** with the new `TagDto` and `Location` header pointing to `/v1/tags/{id}`. New tags are created with `autoEnabled = false`, `rolledOut = true`.
 
 **Errors:**
 
@@ -385,17 +395,17 @@ Create a new tag.
 
 #### `PATCH /v1/tags/{id}`
 
-Rename a tag.
+Partially update a tag. All request fields are optional — send only the ones you want to change.
 
 **Request:**
 
 ```json
-{"name": "#newname"}
+{"name": "#newname", "autoEnabled": true}
 ```
 
 **Success — 200 OK** with the updated `TagDto`. The tag remains attached to all the same photos.
 
-**Errors:** 404, 400, 409 (same conditions as POST).
+**Errors:** 404, 400, 409 (same conditions as POST for `name`).
 
 #### `DELETE /v1/tags/{id}`
 
@@ -414,22 +424,35 @@ User-defined categories with associated colors. Same model as tags, plus a `colo
 ```
 GET    /v1/categories                         → list all
 POST   /v1/categories                         → create new
-PATCH  /v1/categories/{id}                    → update name and/or color
+PATCH  /v1/categories/{id}                    → update name, color, and/or ML flags
 DELETE /v1/categories/{id}                    → delete
 ```
 
-**`CategoryDto`:**
+**`CategoryDto` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Opaque id with `cat-` prefix. |
+| `name` | string | Human-readable category label. |
+| `colorHex` | string | 7-character hex color `#RRGGBB`. |
+| `photoCount` | integer | Number of photos in this category (denied assignments excluded). |
+| `autoEnabled` | boolean | Human switch — allows the ML bot to assign this category automatically. Default `false`. |
+| `rolledOut` | boolean | `false` while a new category is awaiting a full library backfill pass. Flipped to `true` after the scoring run. Default `true`. |
+
+**`CategoryDto` example:**
 
 ```json
 {
   "id": "cat-001",
   "name": "Natura",
   "colorHex": "#FF8B45",
-  "photoCount": 48
+  "photoCount": 48,
+  "autoEnabled": false,
+  "rolledOut": true
 }
 ```
 
-`colorHex` must be a valid 7-character hex string (`#RRGGBB`).
+`colorHex` must be a valid 7-character hex string (`#RRGGBB`). PATCH fields are all optional.
 
 Validation, errors, and semantics mirror tags exactly, with `duplicate-category-name` instead of `duplicate-tag-name`.
 

@@ -863,11 +863,23 @@ components:
     # Tag
     TagDto:
       type: object
-      required: [id, name, photoCount]
+      required: [id, name, photoCount, autoEnabled, rolledOut]
       properties:
         id: { type: string, example: tag-001 }
         name: { type: string, example: '#morze' }
         photoCount: { type: integer, example: 48 }
+        autoEnabled:
+          type: boolean
+          default: false
+          description: >
+            Human switch — allows the ML categoriser bot to assign this tag automatically.
+            Set to `true` to enable nightly auto-assignment; `false` means the bot ignores it.
+        rolledOut:
+          type: boolean
+          default: true
+          description: >
+            `false` while a new tag is awaiting a full library backfill pass from the RTX job.
+            Flipped to `true` automatically after the first complete scoring run.
 
     TagList:
       type: object
@@ -889,21 +901,42 @@ components:
 
     TagUpdateRequest:
       type: object
-      required: [name]
+      description: >
+        All fields are optional — send only the ones you want to change.
+        At least one field should be present (an empty body is accepted as a no-op).
       properties:
         name:
           type: string
           example: '#newname'
+          description: Must start with `#` and be unique (case-insensitive) if provided.
+        autoEnabled:
+          type: boolean
+          description: Toggle ML auto-assignment for this tag.
+        rolledOut:
+          type: boolean
+          description: Marks whether the initial library backfill pass has completed.
 
     # Category
     CategoryDto:
       type: object
-      required: [id, name, colorHex, photoCount]
+      required: [id, name, colorHex, photoCount, autoEnabled, rolledOut]
       properties:
         id: { type: string, example: cat-001 }
         name: { type: string, example: Natura }
         colorHex: { type: string, pattern: '^#[0-9A-Fa-f]{6}$', example: '#FF8B45' }
         photoCount: { type: integer, example: 48 }
+        autoEnabled:
+          type: boolean
+          default: false
+          description: >
+            Human switch — allows the ML categoriser bot to assign this category automatically.
+            Set to `true` to enable nightly auto-assignment; `false` means the bot ignores it.
+        rolledOut:
+          type: boolean
+          default: true
+          description: >
+            `false` while a new category is awaiting a full library backfill pass from the RTX job.
+            Flipped to `true` automatically after the first complete scoring run.
 
     CategoryList:
       type: object
@@ -923,9 +956,18 @@ components:
 
     CategoryUpdateRequest:
       type: object
+      description: >
+        All fields are optional — send only the ones you want to change.
+        At least one field should be present (an empty body is accepted as a no-op).
       properties:
         name: { type: string }
         colorHex: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        autoEnabled:
+          type: boolean
+          description: Toggle ML auto-assignment for this category.
+        rolledOut:
+          type: boolean
+          description: Marks whether the initial library backfill pass has completed.
 
     # Label
     LabelDto:
