@@ -26,6 +26,7 @@ All three must agree on the shapes defined here. When in doubt, this document wi
    - [Labels](#labels)
    - [Uploads](#uploads)
    - [Users](#users)
+   - [Admin — Face clusters](#admin--face-clusters)
 4. [Pagination](#pagination)
 5. [Errors](#errors)
 6. [Versioning](#versioning)
@@ -608,6 +609,105 @@ Used by the client to populate the "uploaded by" filter dropdown.
 
 ---
 
+### Admin — Face clusters
+
+These endpoints are only accessible to users whose JWT access token carries the claim `role = admin`. Regular user tokens receive **403 Forbidden**. They are intended for a standalone web/desktop management tool — **not** the Android app.
+
+The `role = admin` claim is set at login time. Currently the only way to obtain an admin token is to log in with an account that was created with admin privileges directly in the database. There is no role-upgrade endpoint.
+
+#### `GET /v1/admin/face-clusters`
+
+List face clusters produced by the Phase 2 face detection pipeline.
+
+**Query parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `labeled` | bool | If true, return only clusters already assigned to a tag or category. |
+| `unlabeled` | bool | If true, return only clusters not yet assigned to any person. |
+
+The two flags are independent; omit both to return all clusters.
+
+**`FaceClusterDto` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Opaque id with `fcluster-` prefix. |
+| `faceCount` | int | Number of faces belonging to this cluster. |
+| `tagId` | string? | Tag this cluster is mapped to, or null if not yet labelled. |
+| `categoryId` | string? | Category this cluster is mapped to, or null if not yet labelled. |
+| `representativePhotoId` | string? | Photo ID of the highest-confidence face — use for preview. |
+| `representativeBboxX/Y/W/H` | int? | Bounding box of the representative face in `medium.jpg` pixels. |
+
+To render a face crop: fetch `GET /v1/photos/{representativePhotoId}/medium` and crop the image to the bbox rectangle.
+
+**Success — 200 OK:**
+
+```json
+{
+  "items": [
+    {
+      "id": "fcluster-abc123",
+      "faceCount": 7,
+      "tagId": null,
+      "categoryId": null,
+      "representativePhotoId": "photo-abc123",
+      "representativeBboxX": 120,
+      "representativeBboxY": 80,
+      "representativeBboxW": 200,
+      "representativeBboxH": 240
+    }
+  ]
+}
+```
+
+**Errors:** 401, 403.
+
+#### `GET /v1/admin/face-clusters/{id}/faces`
+
+Returns the individual face detections belonging to the cluster. Use this to render a grid of face crops before deciding on a label.
+
+**`FaceDto` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `faceId` | string | Opaque id with `face-` prefix. |
+| `photoId` | string | Photo this face belongs to. |
+| `bboxX/Y/W/H` | int | Bounding box in `medium.jpg` pixels. |
+| `detScore` | float | Detector confidence (0–1). |
+
+**Success — 200 OK** with `{items: [FaceDto, ...]}`.
+
+**Errors:** 404 (`face-cluster-not-found`), 401, 403.
+
+#### `POST /v1/admin/face-clusters/{id}/label`
+
+Map the cluster to a person — an existing tag or category that represents them. Exactly one of `tagId` or `categoryId` must be provided.
+
+**Request:**
+
+```json
+{"tagId": "tag-abc123"}
+```
+
+On success the server:
+1. Sets `auto_enabled = true` on the chosen tag/category so the nightly categoriser will assign it to future matching photos.
+2. Writes `source = auto` junction rows for every photo that contains a face from this cluster, applying the same `manual > denied > auto` precedence as the rest of the pipeline. Existing `manual` or `denied` rows are never overwritten.
+
+**Success — 200 OK** with the updated `FaceClusterDto`.
+
+**Errors:** 400 (`validation-failed`) if neither or both fields are provided; 404 (`face-cluster-not-found`), 401, 403.
+
+#### `DELETE /v1/admin/face-clusters/{id}`
+
+Delete the cluster. Use this to reject a cluster that does not represent a real person (false positives, background faces). Existing `source = auto` photo assignments made by a previous label call are **not** reversed — remove them manually via `PATCH /v1/photos/{id}` if needed.
+
+**Success — 204 No Content.**
+
+**Errors:** 404 (`face-cluster-not-found`), 401, 403.
+
+---
+
 ## Pagination
 
 `GET /v1/photos` is the only paginated endpoint at the moment. Tags, categories, labels, and users return full lists.
@@ -680,7 +780,8 @@ For 400 errors caused by request validation, the response includes an `errors` e
 | `unauthenticated` | 401 | Missing or invalid `Authorization` header |
 | `invalid-token` | 401 | Token is expired, malformed, or revoked |
 | `invalid-credentials` | 401 | Login failed |
-| `forbidden` | 403 | Authenticated but not allowed (reserved for future role-based access) |
+| `forbidden` | 403 | Authenticated but does not have the required role (e.g. `role = admin` for admin endpoints) |
+| `face-cluster-not-found` | 404 | Face cluster specifically |
 | `duplicate-tag-name` | 409 | Tag name already exists |
 | `duplicate-category-name` | 409 | Category name already exists |
 | `invalid-state-transition` | 409 | Operation not allowed in current resource state (e.g., cancel finished upload) |
@@ -790,3 +891,4 @@ This document is versioned alongside the code. Significant changes are recorded 
 | Date | Change |
 |------|--------|
 | 2026-04-29 | Initial draft, v1 of the API contract |
+| 2026-06-05 | Phase 2: admin face-cluster endpoints (`GET`, `GET /faces`, `POST /label`, `DELETE`); `FaceClusterDto`, `FaceDto`, `LabelClusterRequest` schemas; `forbidden` (403) and `face-cluster-not-found` (404) error slugs |

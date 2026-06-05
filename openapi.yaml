@@ -38,6 +38,10 @@ tags:
     description: User accounts (read-only via API)
   - name: health
     description: Service health
+  - name: admin
+    description: >
+      Admin-only endpoints — require JWT `role = admin`. Intended for a standalone
+      web/desktop management tool, not the Android app.
 
 security:
   - bearerAuth: []
@@ -647,6 +651,116 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
 
   # ─────────────────────────────────────────────────────────────────────────
+  # Admin — Face clusters (Phase 2)
+  # ─────────────────────────────────────────────────────────────────────────
+  /admin/face-clusters:
+    get:
+      tags: [admin]
+      summary: List face clusters
+      description: >
+        Returns face clusters produced by the categoriser pipeline. Use `unlabeled=true`
+        to find clusters awaiting a person label. Requires JWT `role = admin`.
+      parameters:
+        - name: labeled
+          in: query
+          schema: { type: boolean }
+          description: If true, return only clusters already assigned to a tag or category.
+        - name: unlabeled
+          in: query
+          schema: { type: boolean }
+          description: If true, return only clusters not yet assigned to any person.
+      responses:
+        '200':
+          description: Cluster list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceClusterListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/face-clusters/{id}/faces:
+    parameters:
+      - $ref: '#/components/parameters/FaceClusterId'
+    get:
+      tags: [admin]
+      summary: List faces in a cluster
+      description: >
+        Returns individual face detections belonging to the cluster. Each face carries
+        a bounding box in `medium.jpg` pixel coordinates — fetch
+        `GET /v1/photos/{photoId}/medium` and crop to render a preview.
+        Requires JWT `role = admin`.
+      responses:
+        '200':
+          description: Face list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceListResponse'
+        '404':
+          $ref: '#/components/responses/FaceClusterNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/face-clusters/{id}/label:
+    parameters:
+      - $ref: '#/components/parameters/FaceClusterId'
+    post:
+      tags: [admin]
+      summary: Label a face cluster as a person
+      description: >
+        Maps the cluster to a tag or category representing a person. Exactly one of
+        `tagId` or `categoryId` must be provided. The server sets `auto_enabled = true`
+        on the chosen label and writes `source = auto` junction rows for all photos that
+        contain a face in this cluster, applying the same `manual > denied > auto`
+        precedence as the nightly categoriser. Requires JWT `role = admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelClusterRequest'
+      responses:
+        '200':
+          description: Cluster updated; photos labelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceClusterDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/FaceClusterNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/face-clusters/{id}:
+    parameters:
+      - $ref: '#/components/parameters/FaceClusterId'
+    delete:
+      tags: [admin]
+      summary: Delete a face cluster
+      description: >
+        Removes the cluster record. Use this to reject clusters that do not represent a
+        real person (false positives, background faces). Existing `source = auto`
+        photo assignments are not reversed. Requires JWT `role = admin`.
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/FaceClusterNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Users
   # ─────────────────────────────────────────────────────────────────────────
   /users:
@@ -699,6 +813,12 @@ components:
       required: true
       schema: { type: string }
       example: upload-xyz789
+    FaceClusterId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+      example: fcluster-abc123
 
   schemas:
 
@@ -1029,6 +1149,71 @@ components:
           items:
             $ref: '#/components/schemas/UploadDto'
 
+    # Admin — Face clusters
+    FaceDto:
+      type: object
+      required: [faceId, photoId, bboxX, bboxY, bboxW, bboxH, detScore]
+      properties:
+        faceId: { type: string, example: face-abc123 }
+        photoId: { type: string, example: photo-abc123 }
+        bboxX: { type: integer, description: Left edge of bounding box in medium.jpg pixels }
+        bboxY: { type: integer, description: Top edge of bounding box in medium.jpg pixels }
+        bboxW: { type: integer, description: Width of bounding box in medium.jpg pixels }
+        bboxH: { type: integer, description: Height of bounding box in medium.jpg pixels }
+        detScore: { type: number, format: double, minimum: 0, maximum: 1, example: 0.95 }
+
+    FaceClusterDto:
+      type: object
+      required: [id, faceCount]
+      properties:
+        id: { type: string, example: fcluster-abc123 }
+        faceCount: { type: integer, example: 7 }
+        tagId:
+          type: string
+          nullable: true
+          description: Tag this cluster is mapped to; null until labelled.
+        categoryId:
+          type: string
+          nullable: true
+          description: Category this cluster is mapped to; null until labelled.
+        representativePhotoId:
+          type: string
+          nullable: true
+          description: Photo ID of the highest-confidence face — use for preview.
+        representativeBboxX: { type: integer, nullable: true }
+        representativeBboxY: { type: integer, nullable: true }
+        representativeBboxW: { type: integer, nullable: true }
+        representativeBboxH: { type: integer, nullable: true }
+
+    LabelClusterRequest:
+      type: object
+      description: Exactly one of tagId or categoryId must be provided.
+      properties:
+        tagId:
+          type: string
+          nullable: true
+        categoryId:
+          type: string
+          nullable: true
+
+    FaceClusterListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaceClusterDto'
+
+    FaceListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaceDto'
+
     # Health
     HealthDto:
       type: object
@@ -1163,6 +1348,20 @@ components:
 
     InvalidStateTransition:
       description: Operation not allowed in current resource state
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    Forbidden:
+      description: Authenticated but does not have the required role (e.g. admin)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    FaceClusterNotFound:
+      description: Face cluster not found
       content:
         application/problem+json:
           schema:
