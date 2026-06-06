@@ -740,6 +740,101 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /admin/face-clusters/{id}/unlabel:
+    parameters:
+      - $ref: '#/components/parameters/FaceClusterId'
+    post:
+      tags: [admin]
+      summary: Remove label from a face cluster
+      description: >
+        Clears the `tagId`/`categoryId` on the cluster and deletes the `source = auto`
+        junction rows that were written by the matching `POST …/label` call
+        (identified by `embedding_run = label-cluster/{id}`). Manual and denied
+        assignments are not touched. If the cluster has no label, this is a no-op
+        that still returns 200. Requires JWT `role = admin`.
+      responses:
+        '200':
+          description: Label removed; updated cluster returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceClusterDto'
+        '404':
+          $ref: '#/components/responses/FaceClusterNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/face-clusters/{id}/merge:
+    parameters:
+      - $ref: '#/components/parameters/FaceClusterId'
+    post:
+      tags: [admin]
+      summary: Merge source clusters into this cluster
+      description: >
+        Moves all faces from each cluster listed in `sourceClusterIds` into the target
+        cluster (`{id}`), recomputes `faceCount` and `representativeFaceId` on the
+        target, then deletes the source cluster rows. The target's label (if any) is
+        preserved; source labels are discarded with their rows. Merged faces retain
+        `cluster_id = {id}`, so the nightly `cluster_faces.py` run will not re-cluster
+        them. `{id}` must not appear in `sourceClusterIds`. Requires JWT `role = admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeClustersRequest'
+      responses:
+        '200':
+          description: Merge complete; updated target cluster returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceClusterDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/FaceClusterNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/face-clusters/{id}/remove-faces:
+    parameters:
+      - $ref: '#/components/parameters/FaceClusterId'
+    post:
+      tags: [admin]
+      summary: Remove specific faces from a cluster
+      description: >
+        Sets `cluster_id = NULL` on the listed faces, returning them to the
+        unassigned pool so the next `cluster_faces.py` run can re-cluster them.
+        Recomputes `faceCount` and `representativeFaceId` on the cluster after
+        removal. Use this to clean contaminated clusters (faces of a different
+        person mixed in by DBSCAN). Requires JWT `role = admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveFacesRequest'
+      responses:
+        '200':
+          description: Faces removed; updated cluster returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceClusterDto'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/FaceClusterNotFound'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /admin/face-clusters/{id}:
     parameters:
       - $ref: '#/components/parameters/FaceClusterId'
@@ -1195,6 +1290,32 @@ components:
         categoryId:
           type: string
           nullable: true
+
+    MergeClustersRequest:
+      type: object
+      description: >
+        List of source cluster IDs to merge into the target cluster. The target is
+        identified by the path parameter `{id}` — it must not appear in this list.
+      required: [sourceClusterIds]
+      properties:
+        sourceClusterIds:
+          type: array
+          items:
+            type: string
+          description: IDs of the clusters to merge into the target.
+
+    RemoveFacesRequest:
+      type: object
+      description: >
+        List of face IDs to remove from the cluster. The listed faces have their
+        `cluster_id` set to NULL and become eligible for re-clustering.
+      required: [faceIds]
+      properties:
+        faceIds:
+          type: array
+          items:
+            type: string
+          description: IDs of the faces to unassign from the cluster.
 
     FaceClusterListResponse:
       type: object
